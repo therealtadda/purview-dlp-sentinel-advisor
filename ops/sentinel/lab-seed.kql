@@ -1,0 +1,9 @@
+// Synthetic fixture only. Publish once to a new isolated lab table.
+datatable(WeekStart:datetime, Source:string, Coverage:string, Volume:string, Correlation:string)
+[
+    datetime(2026-01-05), "CloudAppEvents", "complete", "10-19", "not_applicable",
+    datetime(2026-01-05), "MicrosoftPurviewInformationProtection", "complete", "zero", "not_applicable",
+    datetime(2026-01-05), "SecurityAlert", "complete", "suppressed", "withheld",
+    datetime(2026-01-12), "CloudAppEvents", "complete", "20-49", "not_applicable",
+    datetime(2026-01-12), "SecurityAlert", "partial", "", ""
+]

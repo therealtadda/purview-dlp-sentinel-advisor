@@ -1,0 +1,6 @@
+let first_week = datetime(2026-01-05);
+let end_week_exclusive = datetime(2026-01-12);
+AdvisorWeeklyEvidenceV1_KQL_CL
+| where WeekStart >= first_week and WeekStart < end_week_exclusive
+| project WeekStart, Source, Coverage, Volume, Correlation
+| order by WeekStart asc, Source asc

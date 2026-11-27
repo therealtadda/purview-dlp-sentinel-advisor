@@ -1,0 +1,17 @@
+let week = datetime(2026-01-05);
+let approved_for_release = false;
+let ready = false;
+let link_ready = false;
+let approved = datatable(VendorName:string, ProductName:string, ProviderName:string)[];
+let alerts =
+    SecurityAlert
+    | where TimeGenerated >= week and TimeGenerated < week + 7d
+    | project TimeGenerated, SystemAlertId, VendorName, ProductName, ProviderName,
+              AlertType, StartTime, EndTime;
+let events =
+    CloudAppEvents
+    | where TimeGenerated >= week - 7d and TimeGenerated < week + 8d
+    | project EventTime=todatetime(RawEventData.CreationTime),
+              Cid=tostring(parse_json(tostring(RawEventData.Data)).cid);
+alert_release(alerts, events, approved, week, ready, link_ready)
+| where can_publish_week(week, now(), approved_for_release)

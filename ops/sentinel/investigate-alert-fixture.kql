@@ -1,0 +1,10 @@
+// Synthetic input only. Replaces the CaseAlerts binding in the template.
+let CaseAlerts = datatable(
+    TimeGenerated:datetime, StartTime:datetime, EndTime:datetime, AlertType:string,
+    SystemAlertId:string, VendorName:string, ProductName:string, ProviderName:string
+)[
+    datetime(2026-01-05T01:00:00Z), datetime(2026-01-05T00:50:00Z), datetime(2026-01-05T00:55:00Z), "fixture-alert", "fixture-case-alert", "fixture-vendor", "fixture-product", "fixture-provider",
+    datetime(2026-01-05T02:00:00Z), datetime(2026-01-05T01:50:00Z), datetime(2026-01-05T01:55:00Z), "different-case", "fixture-other-alert", "fixture-vendor", "fixture-product", "fixture-provider",
+    datetime(2026-01-05T03:00:00Z), datetime(2026-01-05T02:50:00Z), datetime(2026-01-05T02:55:00Z), "different-source", "fixture-case-alert", "fixture-vendor", "fixture-product", "other-provider",
+    datetime(2026-01-06T00:00:00Z), datetime(2026-01-05T23:50:00Z), datetime(2026-01-05T23:55:00Z), "outside-window", "fixture-case-alert", "fixture-vendor", "fixture-product", "fixture-provider"
+];

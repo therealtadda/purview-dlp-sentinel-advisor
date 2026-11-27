@@ -1,0 +1,10 @@
+let week = datetime(2026-01-05);
+let approved_for_release = false;
+let ready = false;
+let events =
+    CloudAppEvents
+    | where TimeGenerated >= week and TimeGenerated < week + 7d
+    | where ActionType == "DlpRuleMatch"
+    | project EventId=ReportId;
+event_release(events, "CloudAppEvents", week, ready)
+| where can_publish_week(week, now(), approved_for_release)

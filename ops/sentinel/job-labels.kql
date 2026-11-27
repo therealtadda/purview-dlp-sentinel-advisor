@@ -1,0 +1,13 @@
+let week = datetime(2026-01-05);
+let approved_for_release = false;
+let ready = false;
+let events =
+    MicrosoftPurviewInformationProtection
+    | where TimeGenerated >= week and TimeGenerated < week + 7d
+    | where Operation in ("SensitivityLabelApplied", "SensitivityLabelUpdated",
+                          "SensitivityLabelRemoved", "SensitivityLabelPolicyMatched",
+                          "FileSensitivityLabelApplied", "FileSensitivityLabelChanged",
+                          "FileSensitivityLabelRemoved")
+    | project EventId=Id;
+event_release(events, "MicrosoftPurviewInformationProtection", week, ready)
+| where can_publish_week(week, now(), approved_for_release)

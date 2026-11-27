@@ -1,0 +1,18 @@
+// Interactive portal only. Never submit to MCP or publish as a job.
+let CaseAlerts = SecurityAlert;
+let alert_id = "";
+let approved_vendor = "";
+let approved_product = "";
+let approved_provider = "";
+let from_utc = datetime(null);
+let until_utc = datetime(null);
+CaseAlerts
+| where isnotempty(alert_id)
+    and isnotempty(approved_vendor) and isnotempty(approved_product) and isnotempty(approved_provider)
+    and until_utc > from_utc and until_utc - from_utc <= 1d
+| where TimeGenerated >= from_utc and TimeGenerated < until_utc
+| where SystemAlertId == alert_id and VendorName == approved_vendor
+    and ProductName == approved_product and ProviderName == approved_provider
+| project TimeGenerated, StartTime, EndTime, AlertType, SystemAlertId
+| sort by TimeGenerated desc
+| take 25

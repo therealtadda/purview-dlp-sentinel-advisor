@@ -1,0 +1,11 @@
+.env
+.env.*
+*.pfx
+*.pem
+*.cer
+*.key
+logs/
+local-inputs/
+input-data/
+data/local/
+**/__pycache__/

@@ -1,0 +1,78 @@
+// Prefix one job fragment (or the synthetic assertions) with these definitions.
+let can_publish_week = (week:datetime, clock:datetime, approved_for_release:bool) {
+    approved_for_release and dayofweek(week) == 1d and startofday(week) == week
+        and clock >= week + 9d
+};
+let volume_band = (n:long) {
+    case(n == 0, "zero", n < 10, "suppressed", n < 20, "10-19",
+         n < 50, "20-49", n < 100, "50-99", "100+")
+};
+let event_release = (events:(EventId:string), feed:string, week:datetime, ready:bool) {
+    let rows = materialize(events | project EventId);
+    let valid = ready and toscalar(rows | where isempty(EventId) | count) == 0;
+    rows
+    | where isnotempty(EventId)
+    | distinct EventId
+    | summarize Records=count()
+    | project WeekStart=week, Source=feed, Coverage=iff(valid, "complete", "partial"),
+              Volume=iff(valid, volume_band(Records), ""),
+              Correlation=iff(valid, "not_applicable", "")
+};
+let alert_release = (
+    alerts:(TimeGenerated:datetime, SystemAlertId:string, VendorName:string,
+            ProductName:string, ProviderName:string, AlertType:string,
+            StartTime:datetime, EndTime:datetime),
+    events:(EventTime:datetime, Cid:string),
+    approved:(VendorName:string, ProductName:string, ProviderName:string),
+    week:datetime, ready:bool, link_ready:bool
+) {
+    let filtered = materialize(
+        alerts
+        | where TimeGenerated >= week and TimeGenerated < week + 7d
+        | join kind=leftsemi (
+            approved
+            | where isnotempty(VendorName) and isnotempty(ProductName) and isnotempty(ProviderName)
+            | distinct VendorName, ProductName, ProviderName
+        ) on VendorName, ProductName, ProviderName
+        | distinct TimeGenerated, SystemAlertId, AlertType, StartTime, EndTime
+    );
+    let valid = ready and toscalar(approved | where isnotempty(VendorName)
+        and isnotempty(ProductName) and isnotempty(ProviderName) | count) > 0
+        and toscalar(filtered | where isempty(SystemAlertId) | count) == 0;
+    let latest = materialize(
+        filtered
+        | where isnotempty(SystemAlertId)
+        | summarize LatestTime=max(TimeGenerated) by SystemAlertId
+    );
+    let total = toscalar(latest | count);
+    // Exact copies collapse above; conflicting latest versions invalidate correlation.
+    let latest_versions = materialize(
+        filtered
+        | join kind=leftsemi (latest)
+            on SystemAlertId, $left.TimeGenerated == $right.LatestTime
+    );
+    let valid_windows = materialize(
+        latest_versions
+        | where isnotempty(AlertType) and EndTime > StartTime
+        | where StartTime >= week - 7d and EndTime <= week + 8d
+    );
+    let quality_ready = link_ready and toscalar(latest_versions | count) == total
+        and toscalar(valid_windows | count) == total;
+    let linked = toscalar(
+        valid_windows
+        | where valid and quality_ready and total >= 20
+        | join kind=inner (
+            events
+            | where EventTime >= week - 7d and EventTime < week + 8d
+            | where isnotempty(Cid)
+            | distinct Cid, EventTime
+        ) on $left.AlertType == $right.Cid
+        | where EventTime > StartTime and EventTime < EndTime
+        | distinct SystemAlertId
+        | count
+    );
+    print WeekStart=week, Source="SecurityAlert", Coverage=iff(valid, "complete", "partial"),
+          Volume=iff(valid, volume_band(total), ""),
+          Correlation=case(not(valid), "", not(quality_ready), "unverified",
+                           linked >= 10 and total - linked >= 10, "observed", "withheld")
+};

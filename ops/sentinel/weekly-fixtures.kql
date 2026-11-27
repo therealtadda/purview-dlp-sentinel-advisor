@@ -1,0 +1,86 @@
+let week = datetime(2026-01-05);
+let approved = datatable(VendorName:string, ProductName:string, ProviderName:string)[
+    "fixture-vendor", "fixture-service", "fixture-provider"
+];
+let alerts =
+    range i from 1 to 110 step 1
+    | extend TimeGenerated=week + 2d, SystemAlertId=tostring(i),
+             VendorName=iff(i between (21 .. 50), "different-vendor", "fixture-vendor"),
+             ProductName=iff(i between (51 .. 80), "different-service", "fixture-service"),
+             ProviderName=iff(i > 80, "different-provider", "fixture-provider"),
+             AlertType=tostring(i), StartTime=week, EndTime=week + 1d
+    | project-away i;
+let events =
+    range i from 1 to 10 step 1
+    | project EventTime=week + 2h, Cid=tostring(i);
+let boundaries = datatable(EventTime:datetime, Cid:string)[
+    datetime(2026-01-05), "11", datetime(2026-01-06), "12",
+    datetime(2026-01-04), "13", datetime(2026-01-05T02:00:00), "no-key-match"
+];
+let candidate_alerts = union alerts, (alerts | where SystemAlertId == "1");
+let candidate_events = union events, events, boundaries;
+let nine = range i from 1 to 9 step 1 | project EventId=tostring(i);
+let ten = range i from 1 to 10 step 1 | project EventId=tostring(i);
+let band_cases = datatable(N:long, Expected:string)[
+    0, "zero", 1, "suppressed", 9, "suppressed", 10, "10-19", 19, "10-19",
+    20, "20-49", 49, "20-49", 50, "50-99", 99, "50-99", 100, "100+"
+];
+let tied_alerts = union candidate_alerts,
+    (alerts | where SystemAlertId == "1" | extend AlertType="conflicting-key");
+let released = union
+    (event_release((ten | take 0), "CloudAppEvents", week, true)),
+    (event_release(ten, "CloudAppEvents", week + 7d, false));
+let expected = datatable(Offset:timespan, Enabled:bool)[0d, true, 7d, true, 14d, true, 21d, false]
+    | project WeekStart=week + Offset, Enabled;
+union
+    (band_cases
+        | summarize Mismatches=countif(volume_band(N) != Expected)
+        | project Test="band boundaries", Passed=Mismatches == 0),
+    (print Test="release approval, Monday UTC and seal cutoff",
+           Passed=can_publish_week(week, week + 9d, true)
+               and not(can_publish_week(week, week + 9d - 1s, true))
+               and not(can_publish_week(week + 1h, week + 10d, true))
+               and not(can_publish_week(week + 1d, week + 10d, true))
+               and not(can_publish_week(week, week + 9d, false))),
+    (event_release((union nine, nine), "CloudAppEvents", week, true)
+        | project Test="event dedup and suppression", Passed=Volume == "suppressed"),
+    (event_release(ten, "CloudAppEvents", week, true)
+        | project Test="event threshold", Passed=Volume == "10-19"),
+    (event_release((ten | take 0), "CloudAppEvents", week, true)
+        | project Test="confirmed zero", Passed=Coverage == "complete" and Volume == "zero"),
+    (event_release(ten, "CloudAppEvents", week, false)
+        | project Test="incomplete coverage", Passed=Coverage == "partial" and Volume == ""),
+    (event_release((union ten, (datatable(EventId:string)[""])), "CloudAppEvents", week, true)
+        | project Test="missing event identifier fails closed",
+                  Passed=Coverage == "partial" and Volume == "" and Correlation == ""),
+    (alert_release(candidate_alerts, candidate_events, approved, week, true, true)
+        | project Test="exact allowlist and dedup", Passed=Volume == "20-49" and Correlation == "observed"),
+    (alert_release(candidate_alerts, (candidate_events | where Cid != "10"), approved, week, true, true)
+        | project Test="join key/time and both cohort thresholds", Passed=Correlation == "withheld"),
+    (alert_release(candidate_alerts, (candidate_events | where Cid != "10"), approved, week, true, true)
+        | project Test="unmatched events do not reduce alert volume", Passed=Volume == "20-49"),
+    (alert_release(tied_alerts, candidate_events, approved, week, true, true)
+        | project Test="conflicting latest duplicates invalidate linkage only",
+                  Passed=Volume == "20-49" and Correlation == "unverified"),
+    (alert_release(candidate_alerts, candidate_events, (approved | take 0), week, true, true)
+        | project Test="empty allowlist fails closed", Passed=Coverage == "partial" and Volume == ""),
+    (alert_release((union candidate_alerts, (alerts | where SystemAlertId == "1"
+         | extend SystemAlertId="")), candidate_events, approved, week, true, true)
+        | project Test="missing alert identifier fails closed",
+                  Passed=Coverage == "partial" and Volume == "" and Correlation == ""),
+    (alert_release((candidate_alerts | extend EndTime=StartTime), candidate_events, approved, week, true, true)
+        | project Test="invalid alert window leaves linkage unverified",
+                  Passed=Volume == "20-49" and Correlation == "unverified"),
+    (alert_release(candidate_alerts, candidate_events, approved, week, true, false)
+        | project Test="unverified link does not erase alerts", Passed=Volume == "20-49" and Correlation == "unverified"),
+    (expected
+        | join kind=leftouter released on WeekStart
+        | extend State=case(not(Enabled), "disabled", isempty(Coverage), "missing",
+                            Coverage == "partial", "partial", Volume)
+        | summarize Rows=count(), DistinctStates=make_set(State)
+        | project Test="missing, disabled and partial are not zero",
+                  Passed=Rows == 4 and array_length(DistinctStates) == 4
+                      and set_has_element(DistinctStates, "zero")
+                      and set_has_element(DistinctStates, "missing")
+                      and set_has_element(DistinctStates, "disabled")
+                      and set_has_element(DistinctStates, "partial"))
